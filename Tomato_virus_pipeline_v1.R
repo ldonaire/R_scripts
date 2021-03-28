@@ -98,6 +98,7 @@ system("python path_to_quast/quast.py -o ./QUAST_output_dir/Trinity_assembly --r
 # see report in html or pdf
 
 ########## Mapping contigs to the virus sequences using blastn ###########################
+
 ###### Build Blast nt database
 ## Removing low complex sequences
 system("dustmasker -in path_to_virus_seq/plant_virus_seq.fa -infmt fasta -parse_seqids -outfmt maskinfo_asn1_bin -out path_to_virus_seq/plant_virus_seq.asnb")
@@ -156,7 +157,7 @@ system ("bwa mem -t 12  path_to_virus_seq/Viruses_found path_to_bowtie2_dir/samp
 
 ########## Calculation of genome coverage and average read depth ##########
 
-# Transform to bam, sort the file and create index using samtools v1.7
+# Transform sam to bam, sort the file and create index using samtools v1.7
 system("samtools view -b -S -h path_to_bwa_dir/sampleA_bwa_map.sam > path_to_bwa_dir/sampleA_bwa_map.bam")
 system("samtools sort path_to_bwa_dir/sampleA_bwa_map.bam -o path_to_bwa_dir/sampleA_bwa_map.sort.bam")
 system("samtools index path_to_bwa_dir/sampleA_bwa_map.sort.bam")
@@ -166,9 +167,9 @@ system("samtools depth path_to_bwa_dir/sampleA_bwa_map.sort.bam > path_to_bwa_di
 
 # Get the lenght of the viruses found using samtools faidx
 system("samtools faidx path_to_virus_seq/Viruses_found.fa")
-myVirusLengths <- read.csv("path_to_virus_seq/Viruses_found.fa.fai", sep="\t", header=FALSE, stringsAsFactors = FALSE)
+myVirusInfo <- read.csv("path_to_virus_seq/Viruses_found.fa.fai", sep="\t", header=FALSE, stringsAsFactors = FALSE)
 # Lenghts are column 2
-myVirusLengths <- myVirusLengths[,1:2]
+myVirusLengths <- myVirusInfo[,1:2]
 colnames(myVirusLengths) <- c("ID","Virus_length")
 
 # load files in R to make the calculations
@@ -188,12 +189,35 @@ myCoverage<-function(x,myVirusLenghts){
 mySTAT_sampleA <- myCoverage(myDepthSampleA)
 
 # Add virus information:
+
 # requiered a csv file with virus information (ID, Species, Genus, Family, Segment)
 VirusData <- read.csv("path_to_virus_seq/plant_virus_seq_info.csv", col.names=c("ID","Species","Genus","Family","Segment"))
-
 # join with mySTAT:
-mySTAT <- left_join(mySTAT_sampleA,VirusData,"ID")
-write.csv(mySTAT, file="path_to_bwa_dir/sampleA_calculations.txt", row.names=FALSE)
+mySTAT <- left_join(mySTAT,VirusData,"ID")
+
+# Add counting of reads per viral genome:
+library(rtracklayer)
+library(Rsubread)
+
+# create an annotation file in SAF format
+myAnnSAF<-data.frame(GeneID=myVirusInfo[,1], Gene=myVirusInfo[,1], Start=rep(1,length(myVirusInfo[,1])), End=myVirusInfo[,2], Strand=rep("+",length(myVirusInfo[,1])))
+
+# load sort.bam file 
+bamFile<-list.files(path="path_to_sort_bam_files", pattern=".sort.bam$")
+
+# counting reads mapping to each virus (Gene column)
+counting <-featureCounts(bamFile, annot.ext=MyAnnSAF, isGTFAnnotationFile = FALSE, isPairedEnd=TRUE, countReadPairs=FALSE)
+# extract counts as a data frame
+MyCounts<-as.data.frame(counting$counts)
+MyCounts<-cbind(rownames(MyCounts),MyCounts)
+row.names(MyCounts)<-NULL
+colnames(MyCounts)<-c("ID","Reads.sampleA")
+
+# join with mySTAT
+mySTAT <- left_join(mySTAT,MyCounts,"ID")
+
+# export table
+write.table(mySTAT, file="path_to_results/mapping_stats_sampleA.txt",quote=FALSE,sep="\t",row.names=TRUE)
 
 ########## Getting  consensus sequences of viruses ##########
 # Using samtools and bcftools
